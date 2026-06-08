@@ -18,6 +18,8 @@ REQUIRED_ACCOUNT_COLUMNS = {
     "ARR",
     "Location",
     "Num_Employees",
+    "Num_Marketers",
+    "Risk_Score",
 }
 REQUIRED_REP_COLUMNS = {"Rep_Name", "Location", "Segment"}
 
@@ -59,6 +61,12 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     accounts["Num_Employees"] = (
         pd.to_numeric(accounts["Num_Employees"], errors="coerce").fillna(0).astype(int)
     )
+    accounts["Num_Marketers"] = (
+        pd.to_numeric(accounts["Num_Marketers"], errors="coerce").fillna(0).astype(int)
+    )
+    accounts["Risk_Score"] = pd.to_numeric(
+        accounts["Risk_Score"], errors="coerce"
+    ).fillna(0)
     accounts["Segment"] = ""
     reps["Segment"] = reps["Segment"].str.strip()
 
@@ -131,6 +139,83 @@ def summarize_balance(rep_summary: pd.DataFrame) -> BalanceSummary:
     )
 
 
+def build_before_after_comparison(
+    assignments: pd.DataFrame, reps: pd.DataFrame
+) -> pd.DataFrame:
+    rep_frame = reps[["Rep_Name", "Segment"]].rename(
+        columns={"Rep_Name": "Rep", "Segment": "Rep Segment"}
+    )
+
+    current = (
+        assignments.groupby("Current_Rep", as_index=False)
+        .agg(
+            Current_ARR=("ARR", "sum"),
+            Current_Accounts=("Account_ID", "count"),
+            Current_Avg_Risk=("Risk_Score", "mean"),
+            Current_Marketers=("Num_Marketers", "sum"),
+        )
+        .rename(columns={"Current_Rep": "Rep"})
+    )
+
+    proposed = (
+        assignments.groupby("New_Rep", as_index=False)
+        .agg(
+            New_ARR=("ARR", "sum"),
+            New_Accounts=("Account_ID", "count"),
+            New_Avg_Risk=("Risk_Score", "mean"),
+            New_Marketers=("Num_Marketers", "sum"),
+        )
+        .rename(columns={"New_Rep": "Rep"})
+    )
+
+    moved_out = (
+        assignments[assignments["Current_Rep"] != assignments["New_Rep"]]
+        .groupby("Current_Rep", as_index=False)
+        .agg(
+            Accounts_Moved_Out=("Account_ID", "count"),
+            ARR_Moved_Out=("ARR", "sum"),
+        )
+        .rename(columns={"Current_Rep": "Rep"})
+    )
+
+    moved_in = (
+        assignments[assignments["Current_Rep"] != assignments["New_Rep"]]
+        .groupby("New_Rep", as_index=False)
+        .agg(
+            Accounts_Moved_In=("Account_ID", "count"),
+            ARR_Moved_In=("ARR", "sum"),
+        )
+        .rename(columns={"New_Rep": "Rep"})
+    )
+
+    comparison = (
+        rep_frame.merge(current, on="Rep", how="left")
+        .merge(proposed, on="Rep", how="left")
+        .merge(moved_out, on="Rep", how="left")
+        .merge(moved_in, on="Rep", how="left")
+        .fillna(0)
+    )
+
+    comparison["ARR_Change"] = comparison["New_ARR"] - comparison["Current_ARR"]
+    comparison["Account_Change"] = (
+        comparison["New_Accounts"] - comparison["Current_Accounts"]
+    )
+    comparison["Avg_Risk_Change"] = (
+        comparison["New_Avg_Risk"] - comparison["Current_Avg_Risk"]
+    )
+    comparison["Marketer_Change"] = (
+        comparison["New_Marketers"] - comparison["Current_Marketers"]
+    )
+    comparison["Accounts_Moved"] = (
+        comparison["Accounts_Moved_Out"] + comparison["Accounts_Moved_In"]
+    )
+    comparison["ARR_Moved"] = (
+        comparison["ARR_Moved_Out"] + comparison["ARR_Moved_In"]
+    )
+
+    return comparison.sort_values(["Rep Segment", "Rep"]).reset_index(drop=True)
+
+
 def currency(value: float) -> str:
     return f"${value:,.0f}"
 
@@ -172,10 +257,12 @@ def main() -> None:
         .agg(ARR=("ARR", "sum"), Accounts=("Account_ID", "count"))
         .sort_values(["Segment", "ARR"], ascending=[True, False])
     )
+    comparison = build_before_after_comparison(assignments, reps)
     balance = summarize_balance(rep_summary)
 
     enterprise_accounts = assignments[assignments["Segment"] == "Enterprise"]
     mid_market_accounts = assignments[assignments["Segment"] == "Mid Market"]
+    moved_accounts = assignments[assignments["Current_Rep"] != assignments["New_Rep"]]
 
     metrics = st.columns(5)
     metrics[0].metric("Enterprise Accounts", f"{len(enterprise_accounts):,}")
@@ -183,6 +270,16 @@ def main() -> None:
     metrics[2].metric("Enterprise ARR", currency(enterprise_accounts["ARR"].sum()))
     metrics[3].metric("Mid Market ARR", currency(mid_market_accounts["ARR"].sum()))
     metrics[4].metric("Rep ARR Spread", currency(balance.spread))
+
+    movement_metrics = st.columns(4)
+    movement_metrics[0].metric("Accounts Moved", f"{len(moved_accounts):,}")
+    movement_metrics[1].metric("ARR Moved", currency(moved_accounts["ARR"].sum()))
+    movement_metrics[2].metric(
+        "Avg Current Risk", f"{assignments['Risk_Score'].mean():.1f}"
+    )
+    movement_metrics[3].metric(
+        "Total Marketers", f"{assignments['Num_Marketers'].sum():,}"
+    )
 
     left, right = st.columns([1.2, 0.8])
 
@@ -233,6 +330,83 @@ def main() -> None:
         )
         st.plotly_chart(count_chart, use_container_width=True)
 
+    st.subheader("Before vs. After by Rep")
+    st.caption(
+        "Current ownership comes from Current_Rep. Proposed ownership comes from the ARR-balanced assignment for the selected threshold. Risk and marketers are context only, not assignment inputs."
+    )
+
+    comparison_columns = [
+        "Rep",
+        "Rep Segment",
+        "Current_ARR",
+        "New_ARR",
+        "ARR_Change",
+        "Current_Accounts",
+        "New_Accounts",
+        "Account_Change",
+        "Accounts_Moved",
+        "ARR_Moved",
+        "Current_Avg_Risk",
+        "New_Avg_Risk",
+        "Avg_Risk_Change",
+        "Current_Marketers",
+        "New_Marketers",
+        "Marketer_Change",
+    ]
+    st.dataframe(
+        comparison[comparison_columns],
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Current_ARR": st.column_config.NumberColumn("Current ARR", format="$%d"),
+            "New_ARR": st.column_config.NumberColumn("New ARR", format="$%d"),
+            "ARR_Change": st.column_config.NumberColumn("ARR Change", format="$%d"),
+            "Current_Accounts": st.column_config.NumberColumn("Current Accts"),
+            "New_Accounts": st.column_config.NumberColumn("New Accts"),
+            "Account_Change": st.column_config.NumberColumn("Acct Change"),
+            "Accounts_Moved": st.column_config.NumberColumn("Accts Moved"),
+            "ARR_Moved": st.column_config.NumberColumn("ARR Moved", format="$%d"),
+            "Current_Avg_Risk": st.column_config.NumberColumn(
+                "Current Avg Risk", format="%.1f"
+            ),
+            "New_Avg_Risk": st.column_config.NumberColumn(
+                "New Avg Risk", format="%.1f"
+            ),
+            "Avg_Risk_Change": st.column_config.NumberColumn(
+                "Risk Change", format="%.1f"
+            ),
+            "Current_Marketers": st.column_config.NumberColumn(
+                "Current Marketers", format="%d"
+            ),
+            "New_Marketers": st.column_config.NumberColumn(
+                "New Marketers", format="%d"
+            ),
+            "Marketer_Change": st.column_config.NumberColumn(
+                "Marketer Change", format="%d"
+            ),
+        },
+    )
+
+    change_chart = px.bar(
+        comparison,
+        x="Rep",
+        y="ARR_Change",
+        color="Rep Segment",
+        color_discrete_map={
+            "Enterprise": "#28536B",
+            "Mid Market": "#C36F09",
+        },
+        labels={"ARR_Change": "ARR Change", "Rep": "Rep"},
+    )
+    change_chart.update_layout(
+        yaxis_tickprefix="$",
+        yaxis_tickformat=",",
+        xaxis_title=None,
+        legend_title_text=None,
+        margin=dict(t=20, r=20, b=20, l=20),
+    )
+    st.plotly_chart(change_chart, use_container_width=True)
+
     st.subheader("Threshold Impact")
     scatter = px.scatter(
         assignments,
@@ -270,6 +444,8 @@ def main() -> None:
         "New_Rep",
         "ARR",
         "Num_Employees",
+        "Num_Marketers",
+        "Risk_Score",
         "Location",
     ]
     st.dataframe(
@@ -279,6 +455,10 @@ def main() -> None:
         column_config={
             "ARR": st.column_config.NumberColumn("ARR", format="$%d"),
             "Num_Employees": st.column_config.NumberColumn("Employees", format="%d"),
+            "Num_Marketers": st.column_config.NumberColumn(
+                "Marketers", format="%d"
+            ),
+            "Risk_Score": st.column_config.NumberColumn("Risk", format="%.0f"),
         },
     )
 
@@ -289,7 +469,8 @@ def main() -> None:
             accounts are sorted by ARR from largest to smallest. Each account is then assigned
             to the eligible rep with the lowest current assigned ARR. This balances revenue
             potential directly, while placing the largest accounts early so one rep is less
-            likely to receive an outsized territory by accident.
+            likely to receive an outsized territory by accident. Risk score and marketer count
+            are shown as context in the before/after view, but they do not influence assignment.
             """
         )
 

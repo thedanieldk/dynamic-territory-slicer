@@ -24,10 +24,13 @@ The app expects these files in the project root:
 
 The reassignment engine balances ARR, not account count. For each segment, it sorts accounts by ARR from largest to smallest, then assigns each account to the rep with the lowest current assigned ARR. This greedy load-balancing approach is a practical fit for territory planning because it prioritizes revenue potential and handles large accounts first.
 
+The app also includes a before/after comparison by rep. Current ownership is calculated from `Current_Rep`, while proposed ownership is calculated from the new ARR-balanced assignment. This shows how much ARR and how many accounts each rep gains or loses at a given threshold, plus contextual risk and marketer-count changes. Risk score and marketer count are not used for assignment in this version.
+
 ## Demo checklist
 
 - Load the app.
 - Show the attached account and rep data are being used.
 - Move the employee threshold up and down.
 - Point out that account segmentation, rep assignments, and charts update immediately.
+- Show the before/after table to explain how disruptive each threshold would be.
 - Explain that the balancing logic uses ARR so the territories are equitable by revenue potential.
