@@ -449,10 +449,17 @@ def main() -> None:
     st.subheader("Before vs. After by Rep")
     assignment_mode = "ARR + secondary risk balance" if balance_risk else "ARR only"
     st.caption(
-        f"Current ownership comes from Current_Rep. Proposed ownership uses {assignment_mode} for the selected threshold. Marketers are context only."
+        f"Current ownership comes from Current_Rep. Proposed ownership uses {assignment_mode} for the selected threshold. Ranked by ARR gained, then lower risk-load change. Marketers are context only."
     )
 
+    ranked_comparison = comparison.sort_values(
+        ["ARR_Change", "Risk_Load_Change"],
+        ascending=[False, True],
+    ).reset_index(drop=True)
+    ranked_comparison.insert(0, "Rank", ranked_comparison.index + 1)
+
     comparison_columns = [
+        "Rank",
         "Rep",
         "Rep Segment",
         "Current_ARR",
@@ -473,7 +480,7 @@ def main() -> None:
         "New_Marketers",
         "Marketer_Change",
     ]
-    styled_comparison = comparison[comparison_columns].style.map(
+    styled_comparison = ranked_comparison[comparison_columns].style.map(
         lambda value: style_directional_changes(value, higher_is_better=True),
         subset=["ARR_Change"],
     ).map(
@@ -486,6 +493,7 @@ def main() -> None:
         hide_index=True,
         use_container_width=True,
         column_config={
+            "Rank": st.column_config.NumberColumn("Rank", format="%d"),
             "Current_ARR": st.column_config.NumberColumn("Current ARR", format="$%d"),
             "New_ARR": st.column_config.NumberColumn("New ARR", format="$%d"),
             "ARR_Change": st.column_config.NumberColumn("ARR Change", format="$%d"),
