@@ -26,7 +26,7 @@ The reassignment engine balances ARR, not account count. For each segment, it so
 
 The app also includes a before/after comparison by rep. Current ownership is calculated from `Current_Rep`, while proposed ownership is calculated from the new assignment. This shows how much ARR and how many accounts each rep gains or loses at a given threshold, plus contextual risk and marketer-count changes.
 
-An advanced risk toggle can balance risk after ARR. ARR remains the primary equity metric; when reps are already close on ARR, the model prefers the rep with lower accumulated risk so high-risk accounts are less concentrated. The app shows risk-load spread and before/after risk changes to make that tradeoff visible. Marketer count is shown as context and is not used for assignment.
+An advanced risk toggle can balance risk after ARR. ARR remains the primary equity metric; when reps are already close on ARR, the model simulates the assignment and chooses the rep that creates the lowest resulting risk-load spread across the segment. The app only uses the risk-aware result for a segment when it improves risk-load spread versus ARR-only assignment. Marketer count is shown as context and is not used for assignment.
 
 ## Demo checklist
 

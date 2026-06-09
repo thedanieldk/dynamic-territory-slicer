@@ -93,6 +93,9 @@ def balance_accounts(
     rep_loads = {rep_name: 0.0 for rep_name in rep_names}
     rep_risk_loads = {rep_name: 0.0 for rep_name in rep_names}
     arr_tolerance = float(accounts["ARR"].mean()) * 0.25 if balance_risk else 0.0
+    target_risk_load = (
+        float(accounts["Risk_Score"].sum()) / len(rep_names) if balance_risk else 0.0
+    )
     assignments = []
 
     sorted_accounts = accounts.sort_values(
@@ -110,7 +113,32 @@ def balance_accounts(
             ]
             selected_rep = min(
                 eligible_reps,
-                key=lambda rep_name: (rep_risk_loads[rep_name], rep_loads[rep_name]),
+                key=lambda rep_name: (
+                    max(
+                        rep_risk_loads[candidate]
+                        + (
+                            float(account["Risk_Score"])
+                            if candidate == rep_name
+                            else 0.0
+                        )
+                        for candidate in rep_names
+                    )
+                    - min(
+                        rep_risk_loads[candidate]
+                        + (
+                            float(account["Risk_Score"])
+                            if candidate == rep_name
+                            else 0.0
+                        )
+                        for candidate in rep_names
+                    ),
+                    abs(
+                        rep_risk_loads[rep_name]
+                        + float(account["Risk_Score"])
+                        - target_risk_load
+                    ),
+                    rep_loads[rep_name],
+                ),
             )
         else:
             selected_rep = min(rep_loads, key=rep_loads.get)
@@ -127,6 +155,47 @@ def balance_accounts(
     return pd.DataFrame(assignments)
 
 
+def calculate_risk_load_spread(assignments: pd.DataFrame, rep_names: list[str]) -> float:
+    if assignments.empty or not rep_names:
+        return 0.0
+
+    risk_loads = assignments.groupby("New_Rep")["Risk_Score"].sum().reindex(
+        rep_names, fill_value=0
+    )
+    return float(risk_loads.max() - risk_loads.min())
+
+
+def calculate_max_segment_risk_load_spread(assignments: pd.DataFrame) -> float:
+    if assignments.empty:
+        return 0.0
+
+    segment_risk_loads = (
+        assignments.groupby(["Segment", "New_Rep"], as_index=False)["Risk_Score"].sum()
+    )
+    segment_spreads = segment_risk_loads.groupby("Segment")["Risk_Score"].agg(
+        lambda risk_loads: risk_loads.max() - risk_loads.min()
+    )
+    return float(segment_spreads.max())
+
+
+def choose_segment_assignment(
+    accounts: pd.DataFrame, rep_names: list[str], balance_risk: bool
+) -> pd.DataFrame:
+    arr_only_assignment = balance_accounts(accounts, rep_names)
+
+    if not balance_risk or accounts.empty or not rep_names:
+        return arr_only_assignment
+
+    risk_aware_assignment = balance_accounts(accounts, rep_names, balance_risk=True)
+
+    if calculate_risk_load_spread(
+        risk_aware_assignment, rep_names
+    ) < calculate_risk_load_spread(arr_only_assignment, rep_names):
+        return risk_aware_assignment
+
+    return arr_only_assignment
+
+
 def reassign_accounts(
     accounts: pd.DataFrame, reps: pd.DataFrame, balance_risk: bool = False
 ) -> pd.DataFrame:
@@ -138,8 +207,12 @@ def reassign_accounts(
 
     return pd.concat(
         [
-            balance_accounts(enterprise_accounts, enterprise_reps, balance_risk),
-            balance_accounts(mid_market_accounts, mid_market_reps, balance_risk),
+            choose_segment_assignment(
+                enterprise_accounts, enterprise_reps, balance_risk
+            ),
+            choose_segment_assignment(
+                mid_market_accounts, mid_market_reps, balance_risk
+            ),
         ],
         ignore_index=True,
     )
@@ -281,7 +354,7 @@ def main() -> None:
             value=False,
             help=(
                 "Keeps ARR as the primary balancing metric. When reps are close on ARR, "
-                "the assignment prefers the rep with lower accumulated risk."
+                "risk-aware assignment is used only when it improves segment risk-load spread."
             ),
         )
 
@@ -307,9 +380,7 @@ def main() -> None:
     enterprise_accounts = assignments[assignments["Segment"] == "Enterprise"]
     mid_market_accounts = assignments[assignments["Segment"] == "Mid Market"]
     moved_accounts = assignments[assignments["Current_Rep"] != assignments["New_Rep"]]
-    risk_load_spread = (
-        comparison["New_Risk_Load"].max() - comparison["New_Risk_Load"].min()
-    )
+    risk_load_spread = calculate_max_segment_risk_load_spread(assignments)
 
     metrics = st.columns(5)
     metrics[0].metric("Enterprise Accounts", f"{len(enterprise_accounts):,}")
@@ -510,8 +581,9 @@ def main() -> None:
             potential directly, while placing the largest accounts early so one rep is less
             likely to receive an outsized territory by accident. If the advanced risk toggle is
             enabled, ARR remains the primary metric, but reps who are already close on ARR are
-            compared by accumulated risk so high-risk accounts are less concentrated. Marketer
-            count is shown as context and does not influence assignment.
+            compared by the resulting risk-load spread across the segment. The app keeps the
+            ARR-only result for any segment where risk-aware assignment would not improve risk
+            spread. Marketer count is shown as context and does not influence assignment.
             """
         )
 
