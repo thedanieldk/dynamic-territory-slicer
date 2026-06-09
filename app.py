@@ -32,6 +32,9 @@ class BalanceSummary:
     spread: float
 
 
+SCENARIO_THRESHOLDS = [500, 1_000, 5_000, 10_000, 25_000, 50_000, 100_000]
+
+
 st.set_page_config(
     page_title="Territory Slicer",
     page_icon="",
@@ -216,6 +219,58 @@ def build_before_after_comparison(
     return comparison.sort_values(["Rep Segment", "Rep"]).reset_index(drop=True)
 
 
+def build_scenario_comparison(
+    accounts: pd.DataFrame, reps: pd.DataFrame, current_threshold: int
+) -> pd.DataFrame:
+    min_threshold = min(500, int(accounts["Num_Employees"].min()))
+    max_threshold = int(accounts["Num_Employees"].max())
+    thresholds = sorted(
+        {
+            threshold
+            for threshold in [*SCENARIO_THRESHOLDS, current_threshold]
+            if min_threshold <= threshold <= max_threshold
+        }
+    )
+
+    rows = []
+
+    for scenario_threshold in thresholds:
+        scenario_accounts = assign_segment(accounts, scenario_threshold)
+        scenario_assignments = reassign_accounts(scenario_accounts, reps)
+        scenario_rep_summary = (
+            scenario_assignments.groupby(["Segment", "New_Rep"], as_index=False)
+            .agg(ARR=("ARR", "sum"), Accounts=("Account_ID", "count"))
+            .sort_values(["Segment", "ARR"], ascending=[True, False])
+        )
+        scenario_balance = summarize_balance(scenario_rep_summary)
+        enterprise_accounts = scenario_assignments[
+            scenario_assignments["Segment"] == "Enterprise"
+        ]
+        mid_market_accounts = scenario_assignments[
+            scenario_assignments["Segment"] == "Mid Market"
+        ]
+        moved_accounts = scenario_assignments[
+            scenario_assignments["Current_Rep"] != scenario_assignments["New_Rep"]
+        ]
+
+        rows.append(
+            {
+                "Threshold": scenario_threshold,
+                "Selected": scenario_threshold == current_threshold,
+                "Enterprise_Accounts": len(enterprise_accounts),
+                "Mid_Market_Accounts": len(mid_market_accounts),
+                "Enterprise_ARR": enterprise_accounts["ARR"].sum(),
+                "Mid_Market_ARR": mid_market_accounts["ARR"].sum(),
+                "Rep_ARR_Spread": scenario_balance.spread,
+                "Accounts_Moved": len(moved_accounts),
+                "ARR_Moved": moved_accounts["ARR"].sum(),
+                "Avg_Risk": scenario_assignments["Risk_Score"].mean(),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 def currency(value: float) -> str:
     return f"${value:,.0f}"
 
@@ -268,6 +323,7 @@ def main() -> None:
         .sort_values(["Segment", "ARR"], ascending=[True, False])
     )
     comparison = build_before_after_comparison(assignments, reps)
+    scenario_comparison = build_scenario_comparison(accounts, reps, threshold)
     balance = summarize_balance(rep_summary)
 
     enterprise_accounts = assignments[assignments["Segment"] == "Enterprise"]
@@ -289,6 +345,47 @@ def main() -> None:
     )
     movement_metrics[3].metric(
         "Total Marketers", f"{assignments['Num_Marketers'].sum():,}"
+    )
+
+    st.subheader("Scenario Comparison")
+    st.caption(
+        "Compare common employee thresholds side by side. Lower rep ARR spread means better balance; lower accounts moved and ARR moved means less disruption."
+    )
+    scenario_view = scenario_comparison.copy()
+    scenario_view["Scenario"] = scenario_view.apply(
+        lambda row: f"{int(row['Threshold']):,} (selected)"
+        if row["Selected"]
+        else f"{int(row['Threshold']):,}",
+        axis=1,
+    )
+    scenario_columns = [
+        "Scenario",
+        "Enterprise_Accounts",
+        "Mid_Market_Accounts",
+        "Enterprise_ARR",
+        "Mid_Market_ARR",
+        "Rep_ARR_Spread",
+        "Accounts_Moved",
+        "ARR_Moved",
+        "Avg_Risk",
+    ]
+    st.dataframe(
+        scenario_view[scenario_columns],
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Scenario": st.column_config.TextColumn("Threshold"),
+            "Enterprise_Accounts": st.column_config.NumberColumn("Ent Accts"),
+            "Mid_Market_Accounts": st.column_config.NumberColumn("MM Accts"),
+            "Enterprise_ARR": st.column_config.NumberColumn("Ent ARR", format="$%d"),
+            "Mid_Market_ARR": st.column_config.NumberColumn("MM ARR", format="$%d"),
+            "Rep_ARR_Spread": st.column_config.NumberColumn(
+                "Rep ARR Spread", format="$%d"
+            ),
+            "Accounts_Moved": st.column_config.NumberColumn("Accts Moved"),
+            "ARR_Moved": st.column_config.NumberColumn("ARR Moved", format="$%d"),
+            "Avg_Risk": st.column_config.NumberColumn("Avg Risk", format="%.1f"),
+        },
     )
 
     left, right = st.columns([1.2, 0.8])

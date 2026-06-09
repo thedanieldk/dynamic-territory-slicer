@@ -26,11 +26,14 @@ The reassignment engine balances ARR, not account count. For each segment, it so
 
 The app also includes a before/after comparison by rep. Current ownership is calculated from `Current_Rep`, while proposed ownership is calculated from the new ARR-balanced assignment. This shows how much ARR and how many accounts each rep gains or loses at a given threshold, plus contextual risk and marketer-count changes. Risk score and marketer count are not used for assignment in this version.
 
+The scenario comparison table evaluates several common employee thresholds side by side, plus the currently selected slider value. It helps compare balance and disruption by showing account mix, segment ARR, rep ARR spread, accounts moved, and ARR moved for each threshold.
+
 ## Demo checklist
 
 - Load the app.
 - Show the attached account and rep data are being used.
 - Move the employee threshold up and down.
 - Point out that account segmentation, rep assignments, and charts update immediately.
+- Use the scenario comparison table to compare candidate thresholds.
 - Show the before/after table to explain how disruptive each threshold would be.
 - Explain that the balancing logic uses ARR so the territories are equitable by revenue potential.
