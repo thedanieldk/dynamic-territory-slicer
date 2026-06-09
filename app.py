@@ -220,6 +220,16 @@ def currency(value: float) -> str:
     return f"${value:,.0f}"
 
 
+def style_directional_changes(value: float, higher_is_better: bool) -> str:
+    if value == 0:
+        return ""
+
+    is_good = value > 0 if higher_is_better else value < 0
+    color = "#116329" if is_good else "#B42318"
+    background = "#E7F6EC" if is_good else "#FDE8E7"
+    return f"color: {color}; background-color: {background}; font-weight: 700;"
+
+
 def main() -> None:
     st.title("Territory Slicer")
     st.caption("Model Enterprise vs. Mid Market definitions and rebalance territories by ARR.")
@@ -353,8 +363,16 @@ def main() -> None:
         "New_Marketers",
         "Marketer_Change",
     ]
+    styled_comparison = comparison[comparison_columns].style.map(
+        lambda value: style_directional_changes(value, higher_is_better=True),
+        subset=["ARR_Change"],
+    ).map(
+        lambda value: style_directional_changes(value, higher_is_better=False),
+        subset=["Avg_Risk_Change"],
+    )
+
     st.dataframe(
-        comparison[comparison_columns],
+        styled_comparison,
         hide_index=True,
         use_container_width=True,
         column_config={
