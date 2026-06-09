@@ -24,7 +24,9 @@ The app expects these files in the project root:
 
 The reassignment engine balances ARR, not account count. For each segment, it sorts accounts by ARR from largest to smallest, then assigns each account to the rep with the lowest current assigned ARR. This greedy load-balancing approach is a practical fit for territory planning because it prioritizes revenue potential and handles large accounts first.
 
-The app also includes a before/after comparison by rep. Current ownership is calculated from `Current_Rep`, while proposed ownership is calculated from the new ARR-balanced assignment. This shows how much ARR and how many accounts each rep gains or loses at a given threshold, plus contextual risk and marketer-count changes. Risk score and marketer count are not used for assignment in this version.
+The app also includes a before/after comparison by rep. Current ownership is calculated from `Current_Rep`, while proposed ownership is calculated from the new assignment. This shows how much ARR and how many accounts each rep gains or loses at a given threshold, plus contextual risk and marketer-count changes.
+
+An advanced risk toggle can balance risk after ARR. ARR remains the primary equity metric; when reps are already close on ARR, the model prefers the rep with lower accumulated risk so high-risk accounts are less concentrated. The app shows risk-load spread and before/after risk changes to make that tradeoff visible. Marketer count is shown as context and is not used for assignment.
 
 ## Demo checklist
 
@@ -33,4 +35,5 @@ The app also includes a before/after comparison by rep. Current ownership is cal
 - Move the employee threshold up and down.
 - Point out that account segmentation, rep assignments, and charts update immediately.
 - Show the before/after table to explain how disruptive each threshold would be.
+- Optionally enable the advanced risk toggle to show how risk can be spread after ARR balance.
 - Explain that the balancing logic uses ARR so the territories are equitable by revenue potential.

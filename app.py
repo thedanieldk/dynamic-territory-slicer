@@ -81,7 +81,9 @@ def assign_segment(accounts: pd.DataFrame, threshold: int) -> pd.DataFrame:
     return segmented
 
 
-def balance_accounts(accounts: pd.DataFrame, rep_names: list[str]) -> pd.DataFrame:
+def balance_accounts(
+    accounts: pd.DataFrame, rep_names: list[str], balance_risk: bool = False
+) -> pd.DataFrame:
     if accounts.empty:
         return accounts.assign(New_Rep=pd.Series(dtype="str"), Assigned_Rep_ARR=0)
 
@@ -89,6 +91,8 @@ def balance_accounts(accounts: pd.DataFrame, rep_names: list[str]) -> pd.DataFra
         return accounts.assign(New_Rep="No eligible rep", Assigned_Rep_ARR=0)
 
     rep_loads = {rep_name: 0.0 for rep_name in rep_names}
+    rep_risk_loads = {rep_name: 0.0 for rep_name in rep_names}
+    arr_tolerance = float(accounts["ARR"].mean()) * 0.25 if balance_risk else 0.0
     assignments = []
 
     sorted_accounts = accounts.sort_values(
@@ -97,18 +101,35 @@ def balance_accounts(accounts: pd.DataFrame, rep_names: list[str]) -> pd.DataFra
     )
 
     for _, account in sorted_accounts.iterrows():
-        selected_rep = min(rep_loads, key=rep_loads.get)
+        if balance_risk:
+            lowest_arr = min(rep_loads.values())
+            eligible_reps = [
+                rep_name
+                for rep_name in rep_names
+                if rep_loads[rep_name] <= lowest_arr + arr_tolerance
+            ]
+            selected_rep = min(
+                eligible_reps,
+                key=lambda rep_name: (rep_risk_loads[rep_name], rep_loads[rep_name]),
+            )
+        else:
+            selected_rep = min(rep_loads, key=rep_loads.get)
+
         rep_loads[selected_rep] += float(account["ARR"])
+        rep_risk_loads[selected_rep] += float(account["Risk_Score"])
 
         assigned = account.to_dict()
         assigned["New_Rep"] = selected_rep
         assigned["Assigned_Rep_ARR"] = rep_loads[selected_rep]
+        assigned["Assigned_Rep_Risk"] = rep_risk_loads[selected_rep]
         assignments.append(assigned)
 
     return pd.DataFrame(assignments)
 
 
-def reassign_accounts(accounts: pd.DataFrame, reps: pd.DataFrame) -> pd.DataFrame:
+def reassign_accounts(
+    accounts: pd.DataFrame, reps: pd.DataFrame, balance_risk: bool = False
+) -> pd.DataFrame:
     enterprise_reps = reps.loc[reps["Segment"] == "Enterprise", "Rep_Name"].tolist()
     mid_market_reps = reps.loc[reps["Segment"] == "Mid Market", "Rep_Name"].tolist()
 
@@ -117,8 +138,8 @@ def reassign_accounts(accounts: pd.DataFrame, reps: pd.DataFrame) -> pd.DataFram
 
     return pd.concat(
         [
-            balance_accounts(enterprise_accounts, enterprise_reps),
-            balance_accounts(mid_market_accounts, mid_market_reps),
+            balance_accounts(enterprise_accounts, enterprise_reps, balance_risk),
+            balance_accounts(mid_market_accounts, mid_market_reps, balance_risk),
         ],
         ignore_index=True,
     )
@@ -151,6 +172,7 @@ def build_before_after_comparison(
         .agg(
             Current_ARR=("ARR", "sum"),
             Current_Accounts=("Account_ID", "count"),
+            Current_Risk_Load=("Risk_Score", "sum"),
             Current_Avg_Risk=("Risk_Score", "mean"),
             Current_Marketers=("Num_Marketers", "sum"),
         )
@@ -162,6 +184,7 @@ def build_before_after_comparison(
         .agg(
             New_ARR=("ARR", "sum"),
             New_Accounts=("Account_ID", "count"),
+            New_Risk_Load=("Risk_Score", "sum"),
             New_Avg_Risk=("Risk_Score", "mean"),
             New_Marketers=("Num_Marketers", "sum"),
         )
@@ -202,6 +225,9 @@ def build_before_after_comparison(
     )
     comparison["Avg_Risk_Change"] = (
         comparison["New_Avg_Risk"] - comparison["Current_Avg_Risk"]
+    )
+    comparison["Risk_Load_Change"] = (
+        comparison["New_Risk_Load"] - comparison["Current_Risk_Load"]
     )
     comparison["Marketer_Change"] = (
         comparison["New_Marketers"] - comparison["Current_Marketers"]
@@ -250,6 +276,14 @@ def main() -> None:
             step=max(1, round((max_employees - min_employees) / 200)),
         )
         st.write(f"Accounts with **{threshold:,}+ employees** are Enterprise.")
+        balance_risk = st.checkbox(
+            "Advanced: balance risk after ARR",
+            value=False,
+            help=(
+                "Keeps ARR as the primary balancing metric. When reps are close on ARR, "
+                "the assignment prefers the rep with lower accumulated risk."
+            ),
+        )
 
         st.divider()
         st.subheader("Rep Pool")
@@ -260,7 +294,7 @@ def main() -> None:
         )
 
     segmented_accounts = assign_segment(accounts, threshold)
-    assignments = reassign_accounts(segmented_accounts, reps)
+    assignments = reassign_accounts(segmented_accounts, reps, balance_risk)
 
     rep_summary = (
         assignments.groupby(["Segment", "New_Rep"], as_index=False)
@@ -273,6 +307,9 @@ def main() -> None:
     enterprise_accounts = assignments[assignments["Segment"] == "Enterprise"]
     mid_market_accounts = assignments[assignments["Segment"] == "Mid Market"]
     moved_accounts = assignments[assignments["Current_Rep"] != assignments["New_Rep"]]
+    risk_load_spread = (
+        comparison["New_Risk_Load"].max() - comparison["New_Risk_Load"].min()
+    )
 
     metrics = st.columns(5)
     metrics[0].metric("Enterprise Accounts", f"{len(enterprise_accounts):,}")
@@ -284,9 +321,7 @@ def main() -> None:
     movement_metrics = st.columns(4)
     movement_metrics[0].metric("Accounts Moved", f"{len(moved_accounts):,}")
     movement_metrics[1].metric("ARR Moved", currency(moved_accounts["ARR"].sum()))
-    movement_metrics[2].metric(
-        "Avg Current Risk", f"{assignments['Risk_Score'].mean():.1f}"
-    )
+    movement_metrics[2].metric("Risk Load Spread", f"{risk_load_spread:,.0f}")
     movement_metrics[3].metric(
         "Total Marketers", f"{assignments['Num_Marketers'].sum():,}"
     )
@@ -341,8 +376,9 @@ def main() -> None:
         st.plotly_chart(count_chart, use_container_width=True)
 
     st.subheader("Before vs. After by Rep")
+    assignment_mode = "ARR + secondary risk balance" if balance_risk else "ARR only"
     st.caption(
-        "Current ownership comes from Current_Rep. Proposed ownership comes from the ARR-balanced assignment for the selected threshold. Risk and marketers are context only, not assignment inputs."
+        f"Current ownership comes from Current_Rep. Proposed ownership uses {assignment_mode} for the selected threshold. Marketers are context only."
     )
 
     comparison_columns = [
@@ -356,6 +392,9 @@ def main() -> None:
         "Account_Change",
         "Accounts_Moved",
         "ARR_Moved",
+        "Current_Risk_Load",
+        "New_Risk_Load",
+        "Risk_Load_Change",
         "Current_Avg_Risk",
         "New_Avg_Risk",
         "Avg_Risk_Change",
@@ -368,7 +407,7 @@ def main() -> None:
         subset=["ARR_Change"],
     ).map(
         lambda value: style_directional_changes(value, higher_is_better=False),
-        subset=["Avg_Risk_Change"],
+        subset=["Risk_Load_Change", "Avg_Risk_Change"],
     )
 
     st.dataframe(
@@ -384,6 +423,15 @@ def main() -> None:
             "Account_Change": st.column_config.NumberColumn("Acct Change"),
             "Accounts_Moved": st.column_config.NumberColumn("Accts Moved"),
             "ARR_Moved": st.column_config.NumberColumn("ARR Moved", format="$%d"),
+            "Current_Risk_Load": st.column_config.NumberColumn(
+                "Current Risk Load", format="%.0f"
+            ),
+            "New_Risk_Load": st.column_config.NumberColumn(
+                "New Risk Load", format="%.0f"
+            ),
+            "Risk_Load_Change": st.column_config.NumberColumn(
+                "Risk Load Change", format="%.0f"
+            ),
             "Current_Avg_Risk": st.column_config.NumberColumn(
                 "Current Avg Risk", format="%.1f"
             ),
@@ -460,8 +508,10 @@ def main() -> None:
             accounts are sorted by ARR from largest to smallest. Each account is then assigned
             to the eligible rep with the lowest current assigned ARR. This balances revenue
             potential directly, while placing the largest accounts early so one rep is less
-            likely to receive an outsized territory by accident. Risk score and marketer count
-            are shown as context in the before/after view, but they do not influence assignment.
+            likely to receive an outsized territory by accident. If the advanced risk toggle is
+            enabled, ARR remains the primary metric, but reps who are already close on ARR are
+            compared by accumulated risk so high-risk accounts are less concentrated. Marketer
+            count is shown as context and does not influence assignment.
             """
         )
 
