@@ -32,6 +32,9 @@ class BalanceSummary:
     spread: float
 
 
+ARR_GAIN_SIMILARITY_PCT = 0.05
+
+
 st.set_page_config(
     page_title="Territory Slicer",
     page_icon="",
@@ -329,6 +332,38 @@ def style_directional_changes(value: float, higher_is_better: bool) -> str:
     return f"color: {color}; background-color: {background}; font-weight: 700;"
 
 
+def rank_rep_changes(comparison: pd.DataFrame) -> pd.DataFrame:
+    ranked_segments = []
+
+    for _, segment_frame in comparison.groupby("Rep Segment", sort=True):
+        segment_frame = segment_frame.sort_values("ARR_Change", ascending=False)
+        tolerance = max(
+            float(segment_frame["New_ARR"].mean()) * ARR_GAIN_SIMILARITY_PCT,
+            1.0,
+        )
+        groups = []
+        current_group = 1
+        current_group_anchor = None
+
+        for arr_change in segment_frame["ARR_Change"]:
+            if current_group_anchor is None:
+                current_group_anchor = arr_change
+            elif current_group_anchor - arr_change > tolerance:
+                current_group += 1
+                current_group_anchor = arr_change
+
+            groups.append(current_group)
+
+        segment_frame = segment_frame.assign(ARR_Gain_Group=groups).sort_values(
+            ["ARR_Gain_Group", "Risk_Load_Change", "ARR_Change"],
+            ascending=[True, True, False],
+        )
+        segment_frame.insert(0, "Segment_Rank", range(1, len(segment_frame) + 1))
+        ranked_segments.append(segment_frame)
+
+    return pd.concat(ranked_segments, ignore_index=True)
+
+
 def main() -> None:
     st.title("Territory Slicer")
     st.caption("Model Enterprise vs. Mid Market definitions and rebalance territories by ARR.")
@@ -449,17 +484,13 @@ def main() -> None:
     st.subheader("Before vs. After by Rep")
     assignment_mode = "ARR + secondary risk balance" if balance_risk else "ARR only"
     st.caption(
-        f"Current ownership comes from Current_Rep. Proposed ownership uses {assignment_mode} for the selected threshold. Ranked by ARR gained, then lower risk-load change. Marketers are context only."
+        f"Current ownership comes from Current_Rep. Proposed ownership uses {assignment_mode} for the selected threshold. Ranked within segment by ARR gained; if ARR gains are within 5% of segment average new ARR, lower risk-load change wins. Marketers are context only."
     )
 
-    ranked_comparison = comparison.sort_values(
-        ["ARR_Change", "Risk_Load_Change"],
-        ascending=[False, True],
-    ).reset_index(drop=True)
-    ranked_comparison.insert(0, "Rank", ranked_comparison.index + 1)
+    ranked_comparison = rank_rep_changes(comparison)
 
     comparison_columns = [
-        "Rank",
+        "Segment_Rank",
         "Rep",
         "Rep Segment",
         "Current_ARR",
@@ -493,7 +524,7 @@ def main() -> None:
         hide_index=True,
         use_container_width=True,
         column_config={
-            "Rank": st.column_config.NumberColumn("Rank", format="%d"),
+            "Segment_Rank": st.column_config.NumberColumn("Segment Rank", format="%d"),
             "Current_ARR": st.column_config.NumberColumn("Current ARR", format="$%d"),
             "New_ARR": st.column_config.NumberColumn("New ARR", format="$%d"),
             "ARR_Change": st.column_config.NumberColumn("ARR Change", format="$%d"),
