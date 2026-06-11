@@ -364,6 +364,81 @@ def rank_rep_changes(comparison: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(ranked_segments, ignore_index=True)
 
 
+def render_comparison_table(comparison: pd.DataFrame) -> None:
+    comparison_columns = [
+        "Segment_Rank",
+        "Rep",
+        "Current_ARR",
+        "New_ARR",
+        "ARR_Change",
+        "Current_Accounts",
+        "New_Accounts",
+        "Account_Change",
+        "Accounts_Moved",
+        "ARR_Moved",
+        "Current_Risk_Load",
+        "New_Risk_Load",
+        "Risk_Load_Change",
+        "Current_Avg_Risk",
+        "New_Avg_Risk",
+        "Avg_Risk_Change",
+        "Current_Marketers",
+        "New_Marketers",
+        "Marketer_Change",
+    ]
+    styled_comparison = comparison[comparison_columns].style.map(
+        lambda value: style_directional_changes(value, higher_is_better=True),
+        subset=["ARR_Change"],
+    ).map(
+        lambda value: style_directional_changes(value, higher_is_better=False),
+        subset=["Risk_Load_Change", "Avg_Risk_Change"],
+    )
+
+    st.dataframe(
+        styled_comparison,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Segment_Rank": st.column_config.NumberColumn("Rank", format="%d"),
+            "Current_ARR": st.column_config.NumberColumn("Current ARR", format="$%d"),
+            "New_ARR": st.column_config.NumberColumn("New ARR", format="$%d"),
+            "ARR_Change": st.column_config.NumberColumn("ARR Change", format="$%d"),
+            "Current_Accounts": st.column_config.NumberColumn("Current Accts"),
+            "New_Accounts": st.column_config.NumberColumn("New Accts"),
+            "Account_Change": st.column_config.NumberColumn("Acct Change"),
+            "Accounts_Moved": st.column_config.NumberColumn("Accts Moved"),
+            "ARR_Moved": st.column_config.NumberColumn("ARR Moved", format="$%d"),
+            "Current_Risk_Load": st.column_config.NumberColumn(
+                "Current Risk Load", format="%.0f"
+            ),
+            "New_Risk_Load": st.column_config.NumberColumn(
+                "New Risk Load", format="%.0f"
+            ),
+            "Risk_Load_Change": st.column_config.NumberColumn(
+                "Risk Load Change", format="%.0f"
+            ),
+            "Current_Avg_Risk": st.column_config.NumberColumn(
+                "Current Avg Risk", format="%.1f"
+            ),
+            "New_Avg_Risk": st.column_config.NumberColumn(
+                "New Avg Risk", format="%.1f"
+            ),
+            "Avg_Risk_Change": st.column_config.NumberColumn(
+                "Risk Change", format="%.1f"
+            ),
+            "Current_Marketers": st.column_config.NumberColumn(
+                "Current Marketers", format="%d"
+            ),
+            "New_Marketers": st.column_config.NumberColumn(
+                "New Marketers", format="%d"
+            ),
+            "Marketer_Change": st.column_config.NumberColumn(
+                "Marketer Change", format="%d"
+            ),
+        },
+    )
+
+
 def main() -> None:
     st.title("Territory Slicer")
     st.caption("Model Enterprise vs. Mid Market definitions and rebalance territories by ARR.")
@@ -489,78 +564,14 @@ def main() -> None:
 
     ranked_comparison = rank_rep_changes(comparison)
 
-    comparison_columns = [
-        "Segment_Rank",
-        "Rep",
-        "Rep Segment",
-        "Current_ARR",
-        "New_ARR",
-        "ARR_Change",
-        "Current_Accounts",
-        "New_Accounts",
-        "Account_Change",
-        "Accounts_Moved",
-        "ARR_Moved",
-        "Current_Risk_Load",
-        "New_Risk_Load",
-        "Risk_Load_Change",
-        "Current_Avg_Risk",
-        "New_Avg_Risk",
-        "Avg_Risk_Change",
-        "Current_Marketers",
-        "New_Marketers",
-        "Marketer_Change",
-    ]
-    styled_comparison = ranked_comparison[comparison_columns].style.map(
-        lambda value: style_directional_changes(value, higher_is_better=True),
-        subset=["ARR_Change"],
-    ).map(
-        lambda value: style_directional_changes(value, higher_is_better=False),
-        subset=["Risk_Load_Change", "Avg_Risk_Change"],
+    st.markdown("#### Enterprise")
+    render_comparison_table(
+        ranked_comparison[ranked_comparison["Rep Segment"] == "Enterprise"]
     )
 
-    st.dataframe(
-        styled_comparison,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "Segment_Rank": st.column_config.NumberColumn("Segment Rank", format="%d"),
-            "Current_ARR": st.column_config.NumberColumn("Current ARR", format="$%d"),
-            "New_ARR": st.column_config.NumberColumn("New ARR", format="$%d"),
-            "ARR_Change": st.column_config.NumberColumn("ARR Change", format="$%d"),
-            "Current_Accounts": st.column_config.NumberColumn("Current Accts"),
-            "New_Accounts": st.column_config.NumberColumn("New Accts"),
-            "Account_Change": st.column_config.NumberColumn("Acct Change"),
-            "Accounts_Moved": st.column_config.NumberColumn("Accts Moved"),
-            "ARR_Moved": st.column_config.NumberColumn("ARR Moved", format="$%d"),
-            "Current_Risk_Load": st.column_config.NumberColumn(
-                "Current Risk Load", format="%.0f"
-            ),
-            "New_Risk_Load": st.column_config.NumberColumn(
-                "New Risk Load", format="%.0f"
-            ),
-            "Risk_Load_Change": st.column_config.NumberColumn(
-                "Risk Load Change", format="%.0f"
-            ),
-            "Current_Avg_Risk": st.column_config.NumberColumn(
-                "Current Avg Risk", format="%.1f"
-            ),
-            "New_Avg_Risk": st.column_config.NumberColumn(
-                "New Avg Risk", format="%.1f"
-            ),
-            "Avg_Risk_Change": st.column_config.NumberColumn(
-                "Risk Change", format="%.1f"
-            ),
-            "Current_Marketers": st.column_config.NumberColumn(
-                "Current Marketers", format="%d"
-            ),
-            "New_Marketers": st.column_config.NumberColumn(
-                "New Marketers", format="%d"
-            ),
-            "Marketer_Change": st.column_config.NumberColumn(
-                "Marketer Change", format="%d"
-            ),
-        },
+    st.markdown("#### Mid-Market")
+    render_comparison_table(
+        ranked_comparison[ranked_comparison["Rep Segment"] == "Mid Market"]
     )
 
     change_chart = px.bar(
