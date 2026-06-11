@@ -332,32 +332,37 @@ def style_directional_changes(value: float, higher_is_better: bool) -> str:
     return f"color: {color}; background-color: {background}; font-weight: 700;"
 
 
-def rank_rep_changes(comparison: pd.DataFrame) -> pd.DataFrame:
+def rank_rep_changes(
+    comparison: pd.DataFrame, use_risk_tiebreaker: bool = False
+) -> pd.DataFrame:
     ranked_segments = []
 
     for _, segment_frame in comparison.groupby("Rep Segment", sort=True):
         segment_frame = segment_frame.sort_values("ARR_Change", ascending=False)
-        tolerance = max(
-            float(segment_frame["New_ARR"].mean()) * ARR_GAIN_SIMILARITY_PCT,
-            1.0,
-        )
-        groups = []
-        current_group = 1
-        current_group_anchor = None
 
-        for arr_change in segment_frame["ARR_Change"]:
-            if current_group_anchor is None:
-                current_group_anchor = arr_change
-            elif current_group_anchor - arr_change > tolerance:
-                current_group += 1
-                current_group_anchor = arr_change
+        if use_risk_tiebreaker:
+            tolerance = max(
+                float(segment_frame["New_ARR"].mean()) * ARR_GAIN_SIMILARITY_PCT,
+                1.0,
+            )
+            groups = []
+            current_group = 1
+            current_group_anchor = None
 
-            groups.append(current_group)
+            for arr_change in segment_frame["ARR_Change"]:
+                if current_group_anchor is None:
+                    current_group_anchor = arr_change
+                elif current_group_anchor - arr_change > tolerance:
+                    current_group += 1
+                    current_group_anchor = arr_change
 
-        segment_frame = segment_frame.assign(ARR_Gain_Group=groups).sort_values(
-            ["ARR_Gain_Group", "Risk_Load_Change", "ARR_Change"],
-            ascending=[True, True, False],
-        )
+                groups.append(current_group)
+
+            segment_frame = segment_frame.assign(ARR_Gain_Group=groups).sort_values(
+                ["ARR_Gain_Group", "Risk_Load_Change", "ARR_Change"],
+                ascending=[True, True, False],
+            )
+
         segment_frame.insert(0, "Segment_Rank", range(1, len(segment_frame) + 1))
         ranked_segments.append(segment_frame)
 
@@ -564,11 +569,18 @@ def main() -> None:
 
     st.subheader("Before vs. After by Rep")
     assignment_mode = "ARR + secondary risk balance" if balance_risk else "ARR only"
+    ranking_detail = (
+        "Ranked within segment by ARR gained; if ARR gains are within 5% of segment average new ARR, lower risk-load change wins."
+        if balance_risk
+        else "Ranked within segment by ARR gained."
+    )
     st.caption(
-        f"Current ownership comes from Current_Rep. Proposed ownership uses {assignment_mode} for the selected threshold. Ranked within segment by ARR gained; if ARR gains are within 5% of segment average new ARR, lower risk-load change wins. Marketers are context only."
+        f"Current ownership comes from Current_Rep. Proposed ownership uses {assignment_mode} for the selected threshold. {ranking_detail} Marketers are context only."
     )
 
-    ranked_comparison = rank_rep_changes(comparison)
+    ranked_comparison = rank_rep_changes(
+        comparison, use_risk_tiebreaker=balance_risk
+    )
 
     st.markdown("#### Enterprise")
     render_comparison_table(
