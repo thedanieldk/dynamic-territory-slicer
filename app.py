@@ -400,22 +400,28 @@ def render_comparison_table(comparison: pd.DataFrame) -> None:
         use_container_width=True,
         column_config={
             "Segment_Rank": st.column_config.NumberColumn("Rank", format="%d"),
-            "Current_ARR": st.column_config.NumberColumn("Current ARR", format="$%d"),
-            "New_ARR": st.column_config.NumberColumn("New ARR", format="$%d"),
-            "ARR_Change": st.column_config.NumberColumn("ARR Change", format="$%d"),
+            "Current_ARR": st.column_config.NumberColumn(
+                "Current ARR", format="$%0,0f"
+            ),
+            "New_ARR": st.column_config.NumberColumn(
+                "New ARR", format="$%0,0f"
+            ),
+            "ARR_Change": st.column_config.NumberColumn(
+                "ARR Change", format="$%0,0f"
+            ),
             "Current_Accounts": st.column_config.NumberColumn("Current Accts"),
             "New_Accounts": st.column_config.NumberColumn("New Accts"),
             "Account_Change": st.column_config.NumberColumn("Acct Change"),
             "Accounts_Moved": st.column_config.NumberColumn("Accts Moved"),
-            "ARR_Moved": st.column_config.NumberColumn("ARR Moved", format="$%d"),
+            "ARR_Moved": st.column_config.NumberColumn("ARR Moved", format="$%0,0f"),
             "Current_Risk_Load": st.column_config.NumberColumn(
-                "Current Risk Load", format="%.0f"
+                "Current Risk Load", format="%0,0f"
             ),
             "New_Risk_Load": st.column_config.NumberColumn(
-                "New Risk Load", format="%.0f"
+                "New Risk Load", format="%0,0f"
             ),
             "Risk_Load_Change": st.column_config.NumberColumn(
-                "Risk Load Change", format="%.0f"
+                "Risk Load Change", format="%0,0f"
             ),
             "Current_Avg_Risk": st.column_config.NumberColumn(
                 "Current Avg Risk", format="%.1f"
@@ -427,13 +433,13 @@ def render_comparison_table(comparison: pd.DataFrame) -> None:
                 "Risk Change", format="%.1f"
             ),
             "Current_Marketers": st.column_config.NumberColumn(
-                "Current Marketers", format="%d"
+                "Current Marketers", format="%0,0f"
             ),
             "New_Marketers": st.column_config.NumberColumn(
-                "New Marketers", format="%d"
+                "New Marketers", format="%0,0f"
             ),
             "Marketer_Change": st.column_config.NumberColumn(
-                "Marketer Change", format="%d"
+                "Marketer Change", format="%0,0f"
             ),
         },
     )
